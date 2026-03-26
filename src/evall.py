@@ -8,9 +8,13 @@ def evaluate(model, test_loader, device):
     all_probs, all_labels = [], []
 
     with torch.no_grad():
-        for x, label, _ in test_loader:
-            x, label = x.to(device), label.to(device)
-            label_pred, _ = model(x)
+        for token_ids, depth_ids, subtree_ids, label, _ in test_loader:
+            token_ids   = token_ids.to(device)
+            depth_ids   = depth_ids.to(device)
+            subtree_ids = subtree_ids.to(device)
+            label       = label.to(device)
+
+            label_pred, _ = model(token_ids, depth_ids, subtree_ids)
 
             prob = torch.sigmoid(label_pred)
             preds = (prob > 0.5).float()

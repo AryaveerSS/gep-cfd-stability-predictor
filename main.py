@@ -6,12 +6,12 @@ import torch.nn as nn
 import torch
 
 from src.config import *
-from src.tokenizer import build_vocab
+from src.tokenizer_depth_subtree import build_vocab
 from src.dataset import GEPRunDataset
 from src.model import StabilityTransformer
 from src.train import train_model
 from src.evall import evaluate
-
+print("STARTING PROGRAM", flush=True)
 # Load data
 df = pd.read_csv("data/dataset_all_four.csv")
 
@@ -41,6 +41,8 @@ train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True)
 val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE)
 test_loader = DataLoader(test_dataset, batch_size=BATCH_SIZE)
 
+print("Train size:", len(train_loader), flush=True)
+print("Val size:", len(val_loader), flush=True)
 # model
 model = StabilityTransformer(vocab_size, EMBED_DIM, NUM_HEADS, NUM_LAYERS).to(DEVICE)
 
@@ -54,7 +56,7 @@ mse = nn.MSELoss()
 
 optimizer = torch.optim.AdamW(model.parameters(), lr=LR)
 scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=EPOCHS)
-
+print("Before training", flush=True)
 # train
 train_model(model, train_loader, val_loader, optimizer, scheduler, bce, mse, DEVICE, ALPHA, EPOCHS)
 

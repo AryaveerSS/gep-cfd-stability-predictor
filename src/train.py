@@ -5,11 +5,16 @@ def train_model(model, train_loader, val_loader, optimizer, scheduler, bce, mse,
         model.train()
         correct = total = 0
         epoch_loss = 0.0
-        for x, label, p in train_loader:
-            x, label, p = x.to(DEVICE), label.to(DEVICE), p.to(DEVICE)
+        for token_ids,depth_ids,subtree_ids, label, p in train_loader:
+            token_ids   = token_ids.to(DEVICE)
+            depth_ids   = depth_ids.to(DEVICE)
+            subtree_ids = subtree_ids.to(DEVICE)
+            label       = label.to(DEVICE)
+            p           = p.to(DEVICE)
 
             optimizer.zero_grad()
-            label_pred, p_pred = model(x)
+
+            label_pred, p_pred = model(token_ids, depth_ids, subtree_ids)
 
             loss1 = bce(label_pred, label)
             loss2 = mse(p_pred, p)
@@ -32,9 +37,14 @@ def train_model(model, train_loader, val_loader, optimizer, scheduler, bce, mse,
         correct = total = 0
 
         with torch.no_grad():
-            for x, label, p in val_loader:
-                x, label, p = x.to(DEVICE), label.to(DEVICE), p.to(DEVICE)  # BUG FIX: p on device
-                label_pred, _ = model(x)
+            for token_ids,depth_ids,subtree_ids, label, p in val_loader:
+                token_ids   = token_ids.to(DEVICE)
+                depth_ids   = depth_ids.to(DEVICE)
+                subtree_ids = subtree_ids.to(DEVICE)
+                label       = label.to(DEVICE)
+
+                label_pred, _ = model(token_ids, depth_ids, subtree_ids)
+
                 preds   = (torch.sigmoid(label_pred) > 0.5).float()
                 correct += (preds == label).sum().item()
                 total   += label.size(0)
