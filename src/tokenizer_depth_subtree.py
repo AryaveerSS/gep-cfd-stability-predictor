@@ -6,12 +6,51 @@ import math
 # -----------------------------
 # Basic tokenization
 # -----------------------------
+# def tokenize_raw(text):
+#     """Split prefix expression into tokens, preserving all operators."""
+#     text = text.replace(",", " ")
+#     return [t for t in text.split() if t]
+
+import math
+
+# -----------------------------
+# Constant bucketing
+# -----------------------------
+def bucket_constant(val_str):
+    """Map numeric values to magnitude buckets"""
+    v = abs(float(val_str))
+
+    if v == 0.0:      return "CONST_ZERO"
+    if v < 0.01:      return "CONST_TINY"
+    if v < 0.1:       return "CONST_SMALL"
+    if v < 1.0:       return "CONST_MED"
+    if v < 5.0:       return "CONST_LARGE"
+    return "CONST_HUGE"
+
+
+# -----------------------------
+# Prefix tokenizer
+# -----------------------------
 def tokenize_raw(text):
-    """Split prefix expression into tokens, preserving all operators."""
+    """
+    Tokenize PREFIX expression (space or comma separated)
+    with constant bucketing
+    """
+
+    # Handle both formats safely
     text = text.replace(",", " ")
-    return [t for t in text.split() if t]
 
+    raw_tokens = [t for t in text.split() if t]
 
+    tokens = []
+    for t in raw_tokens:
+        try:
+            # try converting to float → it's a constant
+            tokens.append(bucket_constant(t))
+        except ValueError:
+            tokens.append(t)  # operator or variable
+
+    return tokens
 # -----------------------------
 # Build vocabulary
 # -----------------------------

@@ -1,6 +1,6 @@
 import torch
 
-MAX_LEN = 120
+MAX_LEN = 200
 EMBED_DIM = 128
 NUM_HEADS = 8
 NUM_LAYERS = 4
