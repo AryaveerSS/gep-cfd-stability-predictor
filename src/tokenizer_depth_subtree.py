@@ -2,7 +2,7 @@ import torch
 
 import torch
 import math
-
+import pandas as pd 
 # -----------------------------
 # Basic tokenization
 # -----------------------------
@@ -10,168 +10,93 @@ import math
 #     """Split prefix expression into tokens, preserving all operators."""
 #     text = text.replace(",", " ")
 #     return [t for t in text.split() if t]
-
+import numpy as np
 import math
 
-# -----------------------------
-# Constant bucketing
-# -----------------------------
 def bucket_constant(val_str):
-    """Map numeric values to magnitude buckets"""
     v = abs(float(val_str))
-
-    if v == 0.0:      return "CONST_ZERO"
-    if v < 0.01:      return "CONST_TINY"
-    if v < 0.1:       return "CONST_SMALL"
-    if v < 1.0:       return "CONST_MED"
-    if v < 5.0:       return "CONST_LARGE"
+    if v == 0.0: return "CONST_ZERO"
+    if v < 0.01: return "CONST_TINY"
+    if v < 0.1: return "CONST_SMALL"
+    if v < 1.0: return "CONST_MED"
+    if v < 5.0: return "CONST_LARGE"
     return "CONST_HUGE"
 
-
-# -----------------------------
-# Prefix tokenizer
-# -----------------------------
 def tokenize_raw(text):
-    """
-    Tokenize PREFIX expression (space or comma separated)
-    with constant bucketing
-    """
+    """Split prefix string and bucket numeric constants."""
+    out = []
+    for t in text.split(): # prefix already space-separated
+        if t == "[SEP]":
+            out.append("[SEP]")
+        else:
+            try: out.append(bucket_constant(t))
+            except: out.append(t) # +, -, *, I1, I2
+    return out
 
-    # Handle both formats safely
-    text = text.replace(",", " ")
+OPERATORS = {'+', '-', '*'}
 
-    raw_tokens = [t for t in text.split() if t]
+def parse_prefix(tokens, idx, depth, depths, sizes):
+    """Walk prefix token list, fill depths[] and sizes[]."""
+    if idx >= len(tokens) or tokens[idx] == "[SEP]":
+        return idx, 0
+    depths[idx] = depth
+    if tokens[idx] in OPERATORS:
+        idx, ls = parse_prefix(tokens, idx+1, depth+1, depths, sizes)
+        idx, rs = parse_prefix(tokens, idx, depth+1, depths, sizes)
+        sizes[idx-ls-rs-1] = 1 + ls + rs # ← correct: set by original idx
+        return idx, 1 + ls + rs
+    else:
+        sizes[idx] = 1
+        return idx+1, 1
 
-    tokens = []
-    for t in raw_tokens:
-        try:
-            # try converting to float → it's a constant
-            tokens.append(bucket_constant(t))
-        except ValueError:
-            tokens.append(t)  # operator or variable
+def get_subtree_id(size):
+    if size <= 1: return 0 # leaf
+    if size <= 3: return 1 # tiny
+    if size <= 7: return 2 # small
+    if size <= 15: return 3 # medium
+    return 4 # large
 
-    return tokens
-# -----------------------------
-# Build vocabulary
-# -----------------------------
+
+# new build vocab 
 def build_vocab(strings):
-    vocab = {"[PAD]": 0, "[CLS]": 1, "[SEP]": 2}
+    vocab = {"[PAD]":0, "[CLS]":1, "[SEP]":2}
     idx = 3
-
     for s in strings:
         for t in tokenize_raw(s):
-            if t == "[SEP]":
-                continue
             if t not in vocab:
-                vocab[t] = idx
-                idx += 1
+                vocab[t] = idx; idx += 1
     return vocab
 
+# Final vocab ≈ 14 tokens only:
+# [PAD],[CLS],[SEP],+,-,*,I1,I2,
+# CONST_ZERO,CONST_TINY,CONST_SMALL,
+# CONST_MED,CONST_LARGE,CONST_HUGE
 
-# -----------------------------
-# Depth computation
-# -----------------------------
-def compute_depths(tokens):
-    stack = []
-    depths = []
-    operators = {'+', '-', '*'}
+# new tokenize 
 
-    for token in tokens:
-        if not stack:
-            depth = 0
-        else:
-            depth = stack[-1][1] + 1
+def tokenize(text,vocab,MAX_LEN):
+    raw = ["[CLS]"] + tokenize_raw(text)
+    n = len(raw)
 
-        depths.append(depth)
-
-        if token in operators:
-            stack.append([2, depth])
-
-        while stack:
-            stack[-1][0] -= 1
-            if stack[-1][0] == 0:
-                stack.pop()
-            else:
-                break
-
-    return depths
-
-
-# -----------------------------
-# Subtree size computation
-# -----------------------------
-# FIX THIS FUNCTION
-def compute_subtree_sizes(tokens):
-    n = len(tokens)
+    depths = [0] * n
     sizes = [0] * n
-    stack = []
-    operators = {'+', '-', '*'}
 
-    for i in reversed(range(n)):
-        token = tokens[i]
-
-        if token not in operators:
-            size = 1
+    # parse each of the 4 expressions (split by [SEP])
+    i = 1 # skip [CLS]
+    while i < n:
+        if raw[i] == "[SEP]":
+            depths[i] = 0; sizes[i] = 0
+            i += 1
         else:
-            # SAFE CHECK (critical fix)
-            if len(stack) >= 2:
-                left = stack.pop()
-                right = stack.pop()
-                size = 1 + left + right
-            else:
-                size = 1  # fallback for invalid expressions
+            i, _ = parse_prefix(raw, i, 0, depths, sizes)
 
-        size = int(math.log2(size)) if size > 0 else 0
-        sizes[i] = size
-        stack.append(size if size > 0 else 1)
+    def pad(lst):
+        lst = lst[:MAX_LEN]
+        lst += [0] * (MAX_LEN - len(lst))
+        return torch.tensor(lst, dtype=torch.long)
 
-    return sizes
+    token_ids = [vocab.get(t, 0) for t in raw]
+    depth_ids = [min(d, 9) for d in depths]
+    subtree_ids= [get_subtree_id(s) for s in sizes]
 
-
-# -----------------------------
-# Main tokenize function
-# -----------------------------
-def tokenize(text, vocab, MAX_LEN):
-    tokens = tokenize_raw(text)
-
-    # -----------------------
-    # Token IDs
-    # -----------------------
-    ids = [vocab["[CLS]"]]
-
-    for t in tokens:
-        if t == "[SEP]":
-            ids.append(vocab["[SEP]"])
-        else:
-            ids.append(vocab.get(t, 0))  # unknown → PAD
-
-    # -----------------------
-    # Tree features
-    # -----------------------
-    depth_ids = compute_depths(tokens)
-    subtree_ids = compute_subtree_sizes(tokens)
-
-    # Align with CLS token
-    depth_ids = [0] + depth_ids
-    subtree_ids = [0] + subtree_ids
-
-    # -----------------------
-    # Padding / Truncation
-    # -----------------------
-    if len(ids) < MAX_LEN:
-        pad_len = MAX_LEN - len(ids)
-
-        ids += [0] * pad_len
-        depth_ids += [0] * pad_len
-        subtree_ids += [0] * pad_len
-
-    else:
-        ids = ids[:MAX_LEN]
-        depth_ids = depth_ids[:MAX_LEN]
-        subtree_ids = subtree_ids[:MAX_LEN]
-
-    return (
-        torch.tensor(ids, dtype=torch.long),
-        torch.tensor(depth_ids, dtype=torch.long),
-        torch.tensor(subtree_ids, dtype=torch.long)
-    )
+    return pad(token_ids), pad(depth_ids), pad(subtree_ids)
